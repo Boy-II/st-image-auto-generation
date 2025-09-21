@@ -278,13 +278,14 @@ async function handleIncomingMessage() {
     // 使用正则表达式search
     const imgTagRegex = regexFromString(extension_settings[extensionName].promptInjection.regex);
     // const testRegex = regexFromString(extension_settings[extensionName].promptInjection.regex);
-    let matches = imgTagRegex.global ? [...message.mes.matchAll(imgTagRegex)].map(match => match[1]) : [message.mes.match(imgTagRegex)[1]]; // 只取捕获组的内容
-    console.log(imgTagRegex, matches)
-    if (matches.length > 0) {
+    let matches = imgTagRegex.global ? [...message.mes.matchAll(imgTagRegex)] : [message.mes.match(imgTagRegex)];
+    let prompts = matches.map(match => match);
+    console.log(imgTagRegex, prompts)
+    if (prompts.length > 0) {
         // 延迟执行图片生成，确保消息首先显示出来
         setTimeout(async () => {
             try {
-                toastr.info(`Generating ${matches.length} images...`);
+                toastr.info(`Generating ${prompts.length} images...`);
                 const insertType = extension_settings[extensionName].insertType;
 
 
@@ -308,13 +309,13 @@ async function handleIncomingMessage() {
                 const messageElement = $(`.mes[mesid="${context.chat.length - 1}"]`);
 
                 // 处理每个匹配的图片标签
-                for (let i = 0; i < matches.length; i++) {
-                    const prompt = matches[i];
+                for (let i = 0; i < prompts.length; i++) {
+                    const prompt = prompts[i];
 
                     // @ts-ignore
                     const result = await SlashCommandParser.commands['sd'].callback({ quiet: insertType === INSERT_TYPE.NEW_MESSAGE ? 'false' : 'true' }, prompt);
-                    // 统一插入到extra里
-                    if (insertType === INSERT_TYPE.INLINE) {
+                    
+                    if (insertType === INSERT_TYPE.INLINE || insertType === INSERT_TYPE.REPLACE) {
                         let imageUrl = result;
                         if (typeof imageUrl === 'string' && imageUrl.trim().length > 0) {
                             // 添加图片到swipes数组
@@ -325,31 +326,26 @@ async function handleIncomingMessage() {
                             message.extra.title = prompt;
                             message.extra.inline_image = true;
 
-                            // 更新UI
-                            appendMediaToMessage(message, messageElement);
-
-                            // 保存聊天记录
-                            await context.saveChat();
-                        }
-                    } else if (insertType === INSERT_TYPE.REPLACE) {
-                        let imageUrl = result;
-                        if (typeof imageUrl === 'string' && imageUrl.trim().length > 0) {
-                            // Find the original image tag in the message
-                            const originalTag = message.mes.match(imgTagRegex)[0];
-                            // Replace it with an actual image tag
-                            const newImageTag = `<img src="${imageUrl}" title="${prompt}" alt="${prompt}">`;
-                            message.mes = message.mes.replace(originalTag, newImageTag);
-
-                            // Update the message display using updateMessageBlock
-                            updateMessageBlock(context.chat.length - 1, message);
-
-                            // Save the chat
-                            await context.saveChat();
+                            if (insertType === INSERT_TYPE.REPLACE) {
+                                // 从消息中移除原始标签
+                                const originalTag = matches[i];
+                                message.mes = message.mes.replace(originalTag, '');
+                            }
                         }
                     }
-
                 }
-                toastr.success(`${matches.length} images generated successfully`);
+
+                if (insertType === INSERT_TYPE.INLINE || insertType === INSERT_TYPE.REPLACE) {
+                    // 移除所有空行
+                    message.mes = message.mes.replace(/(\r\n|\n|\r)/gm, "");
+                    // 更新UI
+                    updateMessageBlock(context.chat.length - 1, message);
+                    appendMediaToMessage(message, messageElement);
+                    // 保存聊天记录
+                    await context.saveChat();
+                }
+
+                toastr.success(`${prompts.length} images generated successfully`);
             } catch (error) {
                 toastr.error(`Image generation error: ${error}`);
                 console.error('Image generation error:', error);
@@ -357,4 +353,3 @@ async function handleIncomingMessage() {
         }, 0); //防阻塞UI渲染
     }
 }
-
